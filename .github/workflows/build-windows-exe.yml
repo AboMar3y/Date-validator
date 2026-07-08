@@ -1,0 +1,68 @@
+name: Build Windows Executable
+
+# Builds a ready-to-run DateRangeValidator.exe on a real Windows machine
+# (GitHub's own cloud runners) and uploads it as a downloadable artifact.
+# Tesseract-OCR is installed on the runner and bundled directly into the
+# build, so the resulting .exe needs nothing else installed on the
+# machine that eventually runs it.
+#
+# Triggers:
+#   - Automatically on every push to the main branch
+#   - Manually any time via the "Run workflow" button on the Actions tab
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Tesseract OCR (to be bundled into the build)
+        shell: cmd
+        run: choco install tesseract -y
+
+      - name: Confirm Tesseract install location
+        shell: pwsh
+        run: |
+          $path = "C:\Program Files\Tesseract-OCR\tesseract.exe"
+          if (Test-Path $path) {
+            Write-Host "Found Tesseract at $path - it will be bundled."
+          } else {
+            Write-Host "WARNING: Tesseract not found at the expected path."
+            Write-Host "The build will still succeed, but the resulting .exe"
+            Write-Host "will require Tesseract to be installed separately."
+          }
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build executable
+        shell: pwsh
+        env:
+          TESSERACT_BUNDLE_DIR: C:\Program Files\Tesseract-OCR
+        run: pyinstaller build.spec
+
+      - name: Zip the finished build
+        shell: pwsh
+        run: Compress-Archive -Path "dist\DateRangeValidator\*" -DestinationPath "DateRangeValidator-Windows.zip"
+
+      - name: Upload downloadable build
+        uses: actions/upload-artifact@v4
+        with:
+          name: DateRangeValidator-Windows
+          path: DateRangeValidator-Windows.zip
+          retention-days: 30
