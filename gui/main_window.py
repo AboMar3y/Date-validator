@@ -16,6 +16,7 @@ from PySide6.QtCore import QDate
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
     QDateEdit,
     QFileDialog,
     QHBoxLayout,
@@ -50,9 +51,16 @@ _STATUS_COLORS = {
 
 _STYLESHEET = """
 QMainWindow { background-color: #f5f6fa; }
+QLabel {
+    color: #2c3e50;
+}
 QLabel#TitleLabel { font-size: 20px; font-weight: 600; color: #1f2d3d; }
 QLabel#SubtitleLabel { font-size: 12px; color: #6b7785; }
 QLabel#SectionLabel { font-size: 13px; font-weight: 600; color: #2c3e50; margin-top: 6px; }
+QCheckBox {
+    color: #2c3e50;
+    spacing: 6px;
+}
 QWidget#DragDropArea {
     background-color: #ffffff;
     border: 2px dashed #b8c2cc;
@@ -92,6 +100,7 @@ QTableWidget {
     border: 1px solid #e2e5e9;
     border-radius: 8px;
     gridline-color: #eef0f2;
+    color: #1f2d3d;
 }
 QHeaderView::section {
     background-color: #eef1f5;
@@ -106,6 +115,7 @@ QProgressBar {
     text-align: center;
     background-color: #ffffff;
     height: 22px;
+    color: #1f2d3d;
 }
 QProgressBar::chunk { background-color: #2563eb; border-radius: 5px; }
 QDateEdit {
@@ -113,6 +123,46 @@ QDateEdit {
     border: 1px solid #d0d7de;
     border-radius: 6px;
     background-color: #ffffff;
+    color: #1f2d3d;
+}
+QDateEdit::drop-down {
+    border: none;
+    width: 22px;
+}
+QDateEdit QAbstractItemView {
+    background-color: #ffffff;
+    color: #1f2d3d;
+    selection-background-color: #2563eb;
+    selection-color: #ffffff;
+}
+QCalendarWidget {
+    background-color: #ffffff;
+    color: #1f2d3d;
+}
+QCalendarWidget QToolButton {
+    background-color: #ffffff;
+    color: #1f2d3d;
+    icon-size: 16px;
+}
+QCalendarWidget QMenu {
+    background-color: #ffffff;
+    color: #1f2d3d;
+}
+QCalendarWidget QSpinBox {
+    background-color: #ffffff;
+    color: #1f2d3d;
+}
+QCalendarWidget QAbstractItemView:enabled {
+    background-color: #ffffff;
+    color: #1f2d3d;
+    selection-background-color: #2563eb;
+    selection-color: #ffffff;
+}
+QCalendarWidget QAbstractItemView:disabled {
+    color: #b8c2cc;
+}
+QCalendarWidget QWidget#qt_calendar_navigationbar {
+    background-color: #eef1f5;
 }
 """
 
@@ -204,8 +254,17 @@ class MainWindow(QMainWindow):
         self.cancel_button.clicked.connect(self._on_cancel_clicked)
         self.cancel_button.setEnabled(False)
 
+        self.fast_mode_checkbox = QCheckBox("Fast Mode (printed text only, skip handwriting OCR)")
+        self.fast_mode_checkbox.setToolTip(
+            "Runs Tesseract only, skipping the slower EasyOCR engine.\n"
+            "Much faster, but handwritten dates will likely be missed.\n"
+            "Leave unchecked if any documents may contain handwriting."
+        )
+
         scan_row.addWidget(self.scan_button)
         scan_row.addWidget(self.cancel_button)
+        scan_row.addSpacing(16)
+        scan_row.addWidget(self.fast_mode_checkbox)
         scan_row.addStretch()
         root.addLayout(scan_row)
 
@@ -302,7 +361,8 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(0)
         self.progress_bar.setFormat("Starting scan...")
 
-        self._worker = ScanWorker(list(self._queued_files), start, end)
+        use_easyocr = not self.fast_mode_checkbox.isChecked()
+        self._worker = ScanWorker(list(self._queued_files), start, end, use_easyocr)
         self._worker.progress_updated.connect(self._on_progress_updated)
         self._worker.file_completed.connect(self._on_file_completed)
         self._worker.scan_finished.connect(self._on_scan_finished)
