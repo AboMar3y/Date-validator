@@ -46,11 +46,12 @@ class ScanWorker(QThread):
     scan_error = Signal(str)
 
     def __init__(self, file_paths: list[str], start_date: date, end_date: date,
-                 parent=None) -> None:
+                 use_easyocr: bool = True, parent=None) -> None:
         super().__init__(parent)
         self._file_paths = file_paths
         self._start_date = start_date
         self._end_date = end_date
+        self._use_easyocr = use_easyocr
         self._cancelled = False
 
     def cancel(self) -> None:
@@ -66,7 +67,7 @@ class ScanWorker(QThread):
         try:
             with ProcessPoolExecutor(max_workers=MAX_WORKERS) as executor:
                 future_to_path = {
-                    executor.submit(process_file, path): path
+                    executor.submit(process_file, path, None, self._use_easyocr): path
                     for path in self._file_paths
                 }
                 completed = 0
