@@ -130,9 +130,16 @@ def extract_dates_from_words(all_words: list[OcrWord]) -> list[DetectedDate]:
 
 
 def process_page(image_bgr: np.ndarray, page_width_pt: float, page_height_pt: float,
-                  page_number: int) -> PageResult:
+                  page_number: int, use_easyocr: bool = True) -> PageResult:
     """Run the full OCR + date-extraction pipeline on a single rasterized
-    page image. Used for scanned/image pages (no usable PDF text layer)."""
+    page image. Used for scanned/image pages (no usable PDF text layer).
+
+    use_easyocr=False skips the EasyOCR pass entirely and relies on
+    Tesseract alone, which is substantially faster (EasyOCR runs a neural
+    network and is CPU-bound without a GPU) at the cost of much weaker
+    handwriting recognition. This is what the GUI's "Fast Mode" toggle
+    controls.
+    """
     h, w = image_bgr.shape[:2]
     result = PageResult(
         page_number=page_number,
@@ -152,11 +159,13 @@ def process_page(image_bgr: np.ndarray, page_width_pt: float, page_height_pt: fl
         logger.error("Tesseract failed on page %s: %s", page_number, exc)
         tesseract_words = []
 
-    try:
-        easyocr_words = run_easyocr(processed, PDF_RENDER_DPI)
-    except Exception as exc:
-        logger.error("EasyOCR failed on page %s: %s", page_number, exc)
-        easyocr_words = []
+    easyocr_words: list[OcrWord] = []
+    if use_easyocr:
+        try:
+            easyocr_words = run_easyocr(processed, PDF_RENDER_DPI)
+        except Exception as exc:
+            logger.error("EasyOCR failed on page %s: %s", page_number, exc)
+            easyocr_words = []
 
     if not tesseract_words and not easyocr_words:
         result.error = "OCR failed to extract any text from this page."
@@ -239,7 +248,7 @@ def _try_text_layer_page(pdfplumber_page, fitz_page, page_number: int,
     return result
 
 
-def _process_pdf(file_path: str, progress_callback: ProgressCallback) -> list[PageResult]:
+def _process_pdf(file_path: str, progress_callback: ProgressCallback, use_easyocr: bool = True) -> list[PageResult]:
     """Process every page of a PDF using the hybrid strategy: try the
     born-digital text layer first (fast, exact), and only rasterize +
     run OCR on pages where that isn't available (genuine scanned pages).
@@ -274,7 +283,7 @@ def _process_pdf(file_path: str, progress_callback: ProgressCallback) -> list[Pa
                     # No usable text layer -> this is a scanned page; rasterize and OCR it.
                     try:
                         image = _rasterize_page(fitz_page)
-                        page_result = process_page(image, page_width_pt, page_height_pt, page_number)
+                        page_result = process_page(image, page_width_pt, page_height_pt, page_number, use_easyocr)
                     except Exception as exc:
                         logger.exception("Unhandled error processing page %s of %s", page_number, file_path)
                         page_result = PageResult(page_number=page_number, error=f"Processing error: {exc}")
@@ -288,11 +297,16 @@ def _process_pdf(file_path: str, progress_callback: ProgressCallback) -> list[Pa
     return page_results
 
 
-def process_file(file_path: str, progress_callback: ProgressCallback = None) -> FileResult:
+def process_file(file_path: str, progress_callback: ProgressCallback = None, use_easyocr: bool = True) -> FileResult:
     """Load and process every page of a single file, returning a
     fully-populated FileResult. Handles unreadable/corrupted files and
     unsupported formats gracefully rather than raising, since a single
     bad file should never abort a batch job.
+
+    use_easyocr=False runs Tesseract only, skipping the slower
+    neural-network-based handwriting engine — this is what powers the
+    GUI's "Fast Mode" checkbox. Text-layer pages are unaffected either
+    way, since they never touch OCR at all.
     """
     file_name = os.path.basename(file_path)
     start_time = time.time()
@@ -309,13 +323,13 @@ def process_file(file_path: str, progress_callback: ProgressCallback = None) -> 
 
     try:
         if ext == ".pdf":
-            result.pages = _process_pdf(file_path, progress_callback)
+            result.pages = _process_pdf(file_path, progress_callback, use_easyocr)
         else:
             pages = _load_pages_from_image(file_path)
             total_pages = len(pages)
             for i, (image, pw, ph) in enumerate(pages, start=1):
                 try:
-                    page_result = process_page(image, pw, ph, i)
+                    page_result = process_page(image, pw, ph, i, use_easyocr)
                 except Exception as exc:
                     logger.exception("Unhandled error processing page %s of %s", i, file_name)
                     page_result = PageResult(page_number=i, error=f"Processing error: {exc}")
